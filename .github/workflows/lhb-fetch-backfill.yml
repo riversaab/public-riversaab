@@ -1,0 +1,320 @@
+name: 龙虎榜 L0 批量回填
+
+on:
+  workflow_dispatch:
+    inputs:
+      date_source:
+        description: "日期来源: YYYYMMDD / YYYYMMDD~YYYYMMDD / action-private"
+        required: false
+        default: ""
+        type: string
+      date_range:
+        description: "兼容参数: YYYYMMDD~YYYYMMDD"
+        required: false
+        default: ""
+        type: string
+      max_parallel:
+        description: "每轮并发 runner 数，默认 1，最大 20"
+        required: false
+        default: "1"
+        type: string
+      round_index:
+        description: "当前轮次索引（0-based）"
+        required: false
+        default: "0"
+        type: string
+
+permissions:
+  contents: write
+  actions: write
+
+concurrency:
+  group: lhb-fetch-backfill-${{ github.repository }}
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    env:
+      INPUT_DATE_SOURCE: ${{ github.event.inputs.date_source || '' }}
+      INPUT_DATE_RANGE: ${{ github.event.inputs.date_range || '' }}
+      INPUT_ROUND_INDEX: ${{ github.event.inputs.round_index || '0' }}
+      INPUT_MAX_PARALLEL: ${{ github.event.inputs.max_parallel || '1' }}
+      MY_STOCK_PROJECT_ROOT: ${{ github.workspace }}/my-stock-src
+      DATA_GITHUB_PAT: ${{ secrets.LARKSELF_PAT }}
+      ACTION_DISPATCH_TOKEN_MAP: ${{ secrets.ACTION_DISPATCH_TOKEN_MAP }}
+    outputs:
+      dates_matrix: ${{ steps.resolve.outputs.dates_matrix }}
+      has_work: ${{ steps.resolve.outputs.has_work }}
+      has_next_round: ${{ steps.resolve.outputs.has_next_round }}
+      total_rounds: ${{ steps.resolve.outputs.total_rounds }}
+      current_round: ${{ steps.resolve.outputs.current_round }}
+      effective_date_source: ${{ steps.input.outputs.effective_date_source }}
+      max_parallel: ${{ steps.input.outputs.max_parallel }}
+    steps:
+      - name: Check out workflow replica repo
+        uses: actions/checkout@v4
+
+      - name: Check out my-stock source repo
+        uses: actions/checkout@v4
+        with:
+          repository: hiyishui/my-stock
+          ref: main
+          path: my-stock-src
+          token: ${{ secrets.HIYISHUI_PAT }}
+
+      - name: Resolve runtime roots
+        run: |
+          echo "GP_DATA_ROOT=${RUNNER_TEMP}/gp-data" >> "$GITHUB_ENV"
+          echo "GP_REPOS_ROOT=${RUNNER_TEMP}/gp-data/repos" >> "$GITHUB_ENV"
+          echo "GP_RUNTIME_ROOT=${RUNNER_TEMP}/gp-data/runtime" >> "$GITHUB_ENV"
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Install project dependencies
+        run: |
+          python -m pip install --upgrade pip
+          for i in 1 2 3; do python -m pip install ./my-stock-src && break || sleep 5; done
+
+      - name: Resolve effective inputs
+        id: input
+        shell: bash
+        run: |
+          set -euo pipefail
+          effective_source="${INPUT_DATE_SOURCE}"
+          if [ -z "${effective_source}" ]; then
+            effective_source="${INPUT_DATE_RANGE}"
+          fi
+          echo "effective_date_source=${effective_source}" >> "$GITHUB_OUTPUT"
+          echo "max_parallel=${INPUT_MAX_PARALLEL}" >> "$GITHUB_OUTPUT"
+
+      - name: Resolve backfill dates
+        id: resolve
+        run: |
+          python -m my_stock lhb resolve-backfill-dates \
+            --date-source "${{ steps.input.outputs.effective_date_source }}" \
+            --round-index "${INPUT_ROUND_INDEX}" \
+            --max-parallel "${INPUT_MAX_PARALLEL}" \
+            --trade-dates-file "${GITHUB_WORKSPACE}/my-stock-src/data/basic/trade_date.json" \
+            --matrix-file "job-matrix-lhb.json" \
+            --github-output "$GITHUB_OUTPUT"
+
+  fetch-lhb-batch:
+    runs-on: ubuntu-latest
+    needs: prepare
+    if: needs.prepare.outputs.has_work == 'true'
+    strategy:
+      matrix: ${{ fromJson(needs.prepare.outputs.dates_matrix) }}
+      fail-fast: false
+    env:
+      GP_CODE_GITHUB_OWNER: hiyishui
+      GP_DATA_GITHUB_OWNER: larkself
+      GP_LHB_REPO: gp-lhb
+      DATA_GITHUB_PAT: ${{ secrets.LARKSELF_PAT }}
+      CODE_GITHUB_PAT: ${{ secrets.HIYISHUI_PAT }}
+      MY_STOCK_PROJECT_ROOT: ${{ github.workspace }}/my-stock-src
+    steps:
+      - name: Check out workflow replica repo
+        uses: actions/checkout@v4
+
+      - name: Check out my-stock source repo
+        uses: actions/checkout@v4
+        with:
+          repository: hiyishui/my-stock
+          ref: main
+          path: my-stock-src
+          token: ${{ secrets.HIYISHUI_PAT }}
+
+      - name: Resolve runtime roots
+        run: |
+          echo "GP_DATA_ROOT=${RUNNER_TEMP}/gp-data" >> "$GITHUB_ENV"
+          echo "GP_REPOS_ROOT=${RUNNER_TEMP}/gp-data/repos" >> "$GITHUB_ENV"
+          echo "GP_RUNTIME_ROOT=${RUNNER_TEMP}/gp-data/runtime" >> "$GITHUB_ENV"
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Install project dependencies
+        run: |
+          python -m pip install --upgrade pip
+          for i in 1 2 3; do python -m pip install ./my-stock-src && break || sleep 5; done
+
+      - name: Sync gp-lhb
+        run: python -m my_stock common sync-repo gp-lhb
+
+      - name: Fetch one trade date
+        env:
+          TARGET_DATE: ${{ matrix.date }}
+        run: |
+          python -m my_stock lhb fetch-range \
+            --date "${TARGET_DATE}" \
+            --no-push \
+            --summary-output "${RUNNER_TEMP}/fetch-lhb-${TARGET_DATE}.json"
+
+      - name: Build stock_daily for this date
+        env:
+          TARGET_DATE: ${{ matrix.date }}
+        run: |
+          python -m my_stock lhb extract-base-features \
+            --start "${TARGET_DATE}" \
+            --end "${TARGET_DATE}" \
+            --summary-output "${RUNNER_TEMP}/lhb-stock-daily-${TARGET_DATE}.json"
+
+      - name: Stage artifacts (detail_em + stock_daily)
+        env:
+          TARGET_DATE: ${{ matrix.date }}
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          import shutil
+          from pathlib import Path
+
+          target = os.environ["TARGET_DATE"]
+            detail_summary = Path(os.environ["RUNNER_TEMP"]) / f"fetch-lhb-{target}.json"
+            stock_summary = Path(os.environ["RUNNER_TEMP"]) / f"lhb-stock-daily-{target}.json"
+          artifact_root = Path(os.environ["RUNNER_TEMP"]) / "lhb-artifact"
+          artifact_root.mkdir(parents=True, exist_ok=True)
+
+            detail_payload = json.loads(detail_summary.read_text(encoding="utf-8"))
+            stock_payload = json.loads(stock_summary.read_text(encoding="utf-8"))
+
+            copied_detail = 0
+            copied_stock = 0
+
+            for raw in detail_payload.get("changed_files", []):
+              src = Path(raw)
+              if src.name == "manifest.json":
+                  continue
+              if src.suffix != ".jsonl":
+                  continue
+              year = src.parent.name
+              dest = artifact_root / "detail_em" / year / src.name
+              dest.parent.mkdir(parents=True, exist_ok=True)
+              shutil.copy2(src, dest)
+              copied_detail += 1
+
+            for raw in stock_payload.get("written_files", []):
+              src = Path(raw)
+              if src.suffix != ".parquet":
+                continue
+              year = src.parent.name
+              dest = artifact_root / "stock_daily" / year / src.name
+              dest.parent.mkdir(parents=True, exist_ok=True)
+              shutil.copy2(src, dest)
+              copied_stock += 1
+
+            print(f"staged_detail={copied_detail}, staged_stock_daily={copied_stock}")
+          PY
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: lhb-detail-${{ matrix.date }}
+          path: ${{ runner.temp }}/lhb-artifact
+          if-no-files-found: warn
+          retention-days: 7
+
+  collect-round:
+    runs-on: ubuntu-latest
+    needs: [prepare, fetch-lhb-batch]
+    if: needs.prepare.outputs.has_work == 'true'
+    env:
+      DATA_GITHUB_PAT: ${{ secrets.LARKSELF_PAT }}
+      MY_STOCK_PROJECT_ROOT: ${{ github.workspace }}/my-stock-src
+      ACTION_DISPATCH_TOKEN_MAP: ${{ secrets.ACTION_DISPATCH_TOKEN_MAP }}
+    steps:
+      - name: Check out workflow replica repo
+        uses: actions/checkout@v4
+
+      - name: Check out my-stock source repo
+        uses: actions/checkout@v4
+        with:
+          repository: hiyishui/my-stock
+          ref: main
+          path: my-stock-src
+          token: ${{ secrets.HIYISHUI_PAT }}
+
+      - name: Resolve runtime roots
+        run: |
+          echo "GP_DATA_ROOT=${RUNNER_TEMP}/gp-data" >> "$GITHUB_ENV"
+          echo "GP_REPOS_ROOT=${RUNNER_TEMP}/gp-data/repos" >> "$GITHUB_ENV"
+          echo "GP_RUNTIME_ROOT=${RUNNER_TEMP}/gp-data/runtime" >> "$GITHUB_ENV"
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Install project dependencies
+        run: |
+          python -m pip install --upgrade pip
+          for i in 1 2 3; do python -m pip install ./my-stock-src && break || sleep 5; done
+
+      - name: Download all date artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: lhb-detail-*
+          path: ${{ runner.temp }}/lhb-artifacts
+          merge-multiple: true
+
+      - name: Collect this round to action-private / gp-lhb
+        run: |
+          python -m my_stock lhb collect-round \
+            --artifact-dir "${RUNNER_TEMP}/lhb-artifacts" \
+            --date-source "${{ needs.prepare.outputs.effective_date_source }}" \
+            --dates '${{ needs.prepare.outputs.dates_matrix }}'
+
+  next-round:
+    runs-on: ubuntu-latest
+    needs: [prepare, collect-round]
+    if: needs.prepare.outputs.has_next_round == 'true'
+    env:
+      MY_STOCK_PROJECT_ROOT: ${{ github.workspace }}/my-stock-src
+      DATA_GITHUB_PAT: ${{ secrets.LARKSELF_PAT }}
+      ACTION_DISPATCH_TOKEN_MAP: ${{ secrets.ACTION_DISPATCH_TOKEN_MAP }}
+    steps:
+      - name: Check out workflow replica repo
+        uses: actions/checkout@v4
+
+      - name: Check out my-stock source repo
+        uses: actions/checkout@v4
+        with:
+          repository: hiyishui/my-stock
+          ref: main
+          path: my-stock-src
+          token: ${{ secrets.HIYISHUI_PAT }}
+
+      - name: Resolve runtime roots
+        run: |
+          echo "GP_DATA_ROOT=${RUNNER_TEMP}/gp-data" >> "$GITHUB_ENV"
+          echo "GP_REPOS_ROOT=${RUNNER_TEMP}/gp-data/repos" >> "$GITHUB_ENV"
+          echo "GP_RUNTIME_ROOT=${RUNNER_TEMP}/gp-data/runtime" >> "$GITHUB_ENV"
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Install project dependencies
+        run: |
+          python -m pip install --upgrade pip
+          for i in 1 2 3; do python -m pip install ./my-stock-src && break || sleep 5; done
+
+      - name: Dispatch next round
+        run: |
+          python -m my_stock lhb trigger-next-round \
+            --date-source "${{ needs.prepare.outputs.effective_date_source }}" \
+            --max-parallel "${{ needs.prepare.outputs.max_parallel }}" \
+            --current-round "${{ needs.prepare.outputs.current_round }}" \
+            --total-rounds "${{ needs.prepare.outputs.total_rounds }}" \
+            --workflow-file "lhb-fetch-backfill.yml"

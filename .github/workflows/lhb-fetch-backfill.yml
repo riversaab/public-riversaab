@@ -78,7 +78,7 @@ jobs:
       - name: Install project dependencies
         run: |
           python -m pip install --upgrade pip
-          for i in 1 2 3; do python -m pip install ./my-stock-src && break || sleep 5; done
+          for i in 1 2 3; do python -m pip install './my-stock-src[provider]' && break || sleep 5; done
 
       - name: Resolve effective inputs
         id: input
@@ -144,7 +144,7 @@ jobs:
       - name: Install project dependencies
         run: |
           python -m pip install --upgrade pip
-          for i in 1 2 3; do python -m pip install ./my-stock-src && break || sleep 5; done
+          for i in 1 2 3; do python -m pip install './my-stock-src[provider]' && break || sleep 5; done
 
       - name: Sync gp-lhb
         run: python -m my_stock common sync-repo gp-lhb
@@ -178,40 +178,40 @@ jobs:
           from pathlib import Path
 
           target = os.environ["TARGET_DATE"]
-            detail_summary = Path(os.environ["RUNNER_TEMP"]) / f"fetch-lhb-{target}.json"
-            stock_summary = Path(os.environ["RUNNER_TEMP"]) / f"lhb-stock-daily-{target}.json"
+          detail_summary = Path(os.environ["RUNNER_TEMP"]) / f"fetch-lhb-{target}.json"
+          stock_summary = Path(os.environ["RUNNER_TEMP"]) / f"lhb-stock-daily-{target}.json"
           artifact_root = Path(os.environ["RUNNER_TEMP"]) / "lhb-artifact"
           artifact_root.mkdir(parents=True, exist_ok=True)
 
-            detail_payload = json.loads(detail_summary.read_text(encoding="utf-8"))
-            stock_payload = json.loads(stock_summary.read_text(encoding="utf-8"))
+          detail_payload = json.loads(detail_summary.read_text(encoding="utf-8"))
+          stock_payload = json.loads(stock_summary.read_text(encoding="utf-8"))
 
-            copied_detail = 0
-            copied_stock = 0
+          copied_detail = 0
+          copied_stock = 0
 
-            for raw in detail_payload.get("changed_files", []):
-              src = Path(raw)
-              if src.name == "manifest.json":
-                  continue
-              if src.suffix != ".jsonl":
-                  continue
-              year = src.parent.name
-              dest = artifact_root / "detail_em" / year / src.name
-              dest.parent.mkdir(parents=True, exist_ok=True)
-              shutil.copy2(src, dest)
-              copied_detail += 1
+          for raw in detail_payload.get("changed_files", []):
+            src = Path(raw)
+            if src.name == "manifest.json":
+              continue
+            if src.suffix != ".jsonl":
+              continue
+            year = src.parent.name
+            dest = artifact_root / "detail_em" / year / src.name
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(src, dest)
+            copied_detail += 1
 
-            for raw in stock_payload.get("written_files", []):
-              src = Path(raw)
-              if src.suffix != ".parquet":
-                continue
-              year = src.parent.name
-              dest = artifact_root / "stock_daily" / year / src.name
-              dest.parent.mkdir(parents=True, exist_ok=True)
-              shutil.copy2(src, dest)
-              copied_stock += 1
+          for raw in stock_payload.get("written_files", []):
+            src = Path(raw)
+            if src.suffix != ".parquet":
+              continue
+            year = src.parent.name
+            dest = artifact_root / "stock_daily" / year / src.name
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(src, dest)
+            copied_stock += 1
 
-            print(f"staged_detail={copied_detail}, staged_stock_daily={copied_stock}")
+          print(f"staged_detail={copied_detail}, staged_stock_daily={copied_stock}")
           PY
 
       - name: Upload artifact
@@ -257,7 +257,7 @@ jobs:
       - name: Install project dependencies
         run: |
           python -m pip install --upgrade pip
-          for i in 1 2 3; do python -m pip install ./my-stock-src && break || sleep 5; done
+          for i in 1 2 3; do python -m pip install './my-stock-src[provider]' && break || sleep 5; done
 
       - name: Download all date artifacts
         uses: actions/download-artifact@v4
@@ -308,7 +308,7 @@ jobs:
       - name: Install project dependencies
         run: |
           python -m pip install --upgrade pip
-          for i in 1 2 3; do python -m pip install ./my-stock-src && break || sleep 5; done
+          for i in 1 2 3; do python -m pip install './my-stock-src[provider]' && break || sleep 5; done
 
       - name: Dispatch next round
         run: |

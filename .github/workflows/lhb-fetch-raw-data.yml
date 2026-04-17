@@ -191,7 +191,7 @@ jobs:
           copied_detail = 0
           copied_stock = 0
 
-          for raw in detail_payload.get("changed_files", []):
+          for raw in detail_payload.get("changed_files", []) + detail_payload.get("unchanged_files", []):
             src = Path(raw)
             if src.name == "manifest.json":
               continue

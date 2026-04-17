@@ -89,11 +89,20 @@ jobs:
           if [ -z "${effective_source}" ]; then
             effective_source="${INPUT_DATE_RANGE}"
           fi
+
+          # Default to today (Asia/Shanghai) when no date input is given
+          if [ -z "${effective_source}" ]; then
+            today_cst=$(TZ=Asia/Shanghai date +%Y%m%d)
+            effective_source="${today_cst}"
+          fi
+
+          echo "skip_run=false" >> "$GITHUB_OUTPUT"
           echo "effective_date_source=${effective_source}" >> "$GITHUB_OUTPUT"
           echo "max_parallel=${INPUT_MAX_PARALLEL}" >> "$GITHUB_OUTPUT"
 
       - name: Resolve backfill dates
         id: resolve
+        if: steps.input.outputs.skip_run != 'true'
         run: |
           python -m my_stock lhb resolve-backfill-dates \
             --date-source "${{ steps.input.outputs.effective_date_source }}" \
@@ -165,6 +174,8 @@ jobs:
           python -m my_stock lhb extract-base-features \
             --start "${TARGET_DATE}" \
             --end "${TARGET_DATE}" \
+            --detail-root "${GP_RUNTIME_ROOT}/lhb/detail_em" \
+            --output-root "${RUNNER_TEMP}/lhb-stock-daily" \
             --summary-output "${RUNNER_TEMP}/lhb-stock-daily-${TARGET_DATE}.json"
 
       - name: Stage artifacts (detail_em + stock_daily)
@@ -228,6 +239,7 @@ jobs:
     if: needs.prepare.outputs.has_work == 'true'
     env:
       DATA_GITHUB_PAT: ${{ secrets.LARKSELF_PAT }}
+      GP_DATA_GITHUB_OWNER: larkself
       MY_STOCK_PROJECT_ROOT: ${{ github.workspace }}/my-stock-src
       ACTION_DISPATCH_TOKEN_MAP: ${{ secrets.ACTION_DISPATCH_TOKEN_MAP }}
     steps:
@@ -268,6 +280,7 @@ jobs:
 
       - name: Collect this round to action-private / gp-lhb
         run: |
+          mkdir -p "${RUNNER_TEMP}/lhb-artifacts"
           python -m my_stock lhb collect-round \
             --artifact-dir "${RUNNER_TEMP}/lhb-artifacts" \
             --date-source "${{ needs.prepare.outputs.effective_date_source }}" \

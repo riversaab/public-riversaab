@@ -321,4 +321,4 @@ jobs:
             --max-parallel "${{ needs.prepare.outputs.max_parallel }}" \
             --current-round "${{ needs.prepare.outputs.current_round }}" \
             --total-rounds "${{ needs.prepare.outputs.total_rounds }}" \
-            --workflow-file "lhb-fetch-backfill.yml"
+            --workflow-file "lhb-fetch-raw-data.yml"

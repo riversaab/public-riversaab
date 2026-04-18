@@ -84,14 +84,14 @@ jobs:
           if [ -z "${effective_source}" ]; then
             # 日常模式：取当前日期往前 11 个交易日，确保目标日期之后有 >= 10 个交易日的未来数据
             effective_source=$(python -c "
-import json, pathlib, datetime
-td = json.loads(pathlib.Path('my-stock-src/data/basic/trade_date.json').read_text())
-td = [d.replace('-','') if '-' in d else d for d in (td.get('trade_dates', td) if isinstance(td, dict) else td)]
-today = datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=8))).strftime('%Y%m%d')
-idx = next((i for i,d in enumerate(td) if d >= today), len(td)) - 1
-target = td[max(0, idx - 11)]
-print(f'{target}~{target}')
-")
+            import json, pathlib, datetime
+            td = json.loads(pathlib.Path('my-stock-src/data/basic/trade_date.json').read_text())
+            td = [d.replace('-','') if '-' in d else d for d in (td.get('trade_dates', td) if isinstance(td, dict) else td)]
+            today = datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=8))).strftime('%Y%m%d')
+            idx = next((i for i,d in enumerate(td) if d >= today), len(td)) - 1
+            target = td[max(0, idx - 11)]
+            print(f'{target}~{target}')
+            ")
           fi
           echo "effective_date_source=${effective_source}" >> "$GITHUB_OUTPUT"
           echo "max_parallel=${INPUT_MAX_PARALLEL}" >> "$GITHUB_OUTPUT"
@@ -153,36 +153,19 @@ print(f'{target}~{target}')
           python -m pip install --upgrade pip
           for i in 1 2 3; do python -m pip install ./my-stock-src && break || sleep 5; done
 
-      - name: Prepare stock_daily source
-        id: source
-        env:
-          EFFECTIVE_DATE_SOURCE: ${{ needs.prepare.outputs.effective_date_source }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          if [ "${EFFECTIVE_DATE_SOURCE}" = "action-private" ]; then
-            python -m my_stock lhb clone-action-private-stock-daily \
-              --output-dir "${RUNNER_TEMP}/ap-data"
-            echo "input_root=${RUNNER_TEMP}/ap-data/stock_daily" >> "$GITHUB_OUTPUT"
-          else
-            python -m my_stock common sync-repo gp-lhb
-            echo "input_root=" >> "$GITHUB_OUTPUT"
-          fi
+      - name: Sync gp-lhb data repo
+        run: python -m my_stock common sync-repo gp-lhb
 
       - name: Derive future features
         env:
           BATCH_DATE: ${{ matrix.date }}
         run: |
-          extra_args=""
-          if [ -n "${{ steps.source.outputs.input_root }}" ]; then
-            extra_args="--input-root ${{ steps.source.outputs.input_root }}"
-          fi
           python -m my_stock lhb derive-future-features \
             --date-range "${BATCH_DATE}~${BATCH_DATE}" \
             --trade-dates-file "${GITHUB_WORKSPACE}/my-stock-src/data/basic/trade_date.json" \
+            --input-root "${GP_REPOS_ROOT}/gp-lhb/data/lhb/stock_daily" \
             --summary-output "${RUNNER_TEMP}/lhb-l2f-summary.json" \
-            --github-output "$GITHUB_OUTPUT" \
-            ${extra_args}
+            --github-output "$GITHUB_OUTPUT"
 
       - name: Publish directly (daily mode)
         if: needs.prepare.outputs.effective_date_source != 'action-private'
@@ -341,100 +324,3 @@ print(f'{target}~{target}')
             --current-round "${{ needs.prepare.outputs.current_round }}" \
             --total-rounds "${{ needs.prepare.outputs.total_rounds }}" \
             --workflow-file "lhb-derive-future-features.yml"
-name: 龙虎榜前瞻特征提取 (L2F)
-
-on:
-  workflow_dispatch:
-    inputs:
-      date_range:
-        description: "可选日期范围: YYYYMMDD~YYYYMMDD；留空时自动处理收盘后的近10个交易日"
-        required: false
-        default: ""
-        type: string
-  # schedule:
-  #   - cron: "30 7 * * 1-5"   # 北京时间 15:30，仅工作日
-
-permissions:
-  contents: read
-
-concurrency:
-  group: lhb-derive-future-features
-  cancel-in-progress: false
-
-jobs:
-  derive-future:
-    runs-on: ubuntu-latest
-    env:
-      GP_CODE_GITHUB_OWNER: hiyishui
-      GP_DATA_GITHUB_OWNER: larkself
-      GP_CODE_REPO: my-stock
-      GP_LHB_REPO: gp-lhb
-      GP_LHB_DERIVED_REPO: gp-lhb-derived
-      INPUT_DATE_RANGE: ${{ github.event.inputs.date_range || '' }}
-      DATA_GITHUB_PAT: ${{ secrets.LARKSELF_PAT }}
-      CODE_GITHUB_PAT: ${{ secrets.HIYISHUI_PAT }}
-      MY_STOCK_PROJECT_ROOT: ${{ github.workspace }}/my-stock-src
-    steps:
-      - name: Check out workflow replica repo
-        uses: actions/checkout@v4
-
-      - name: Check out my-stock source repo
-        uses: actions/checkout@v4
-        with:
-          repository: hiyishui/my-stock
-          ref: main
-          path: my-stock-src
-          token: ${{ secrets.HIYISHUI_PAT }}
-
-      - name: Resolve runtime roots
-        run: |
-          echo "GP_DATA_ROOT=${RUNNER_TEMP}/gp-data" >> "$GITHUB_ENV"
-          echo "GP_REPOS_ROOT=${RUNNER_TEMP}/gp-data/repos" >> "$GITHUB_ENV"
-          echo "GP_RUNTIME_ROOT=${RUNNER_TEMP}/gp-data/runtime" >> "$GITHUB_ENV"
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.13"
-
-      - name: Install project dependencies
-        run: |
-          python -m pip install --upgrade pip
-          for i in 1 2 3; do python -m pip install ./my-stock-src && break || sleep 5; done
-
-      - name: Sync gp-lhb (L1 source)
-        run: python -m my_stock common sync-repo gp-lhb
-
-      - name: Derive future features (L2F)
-        id: derive
-        run: |
-          python -m my_stock lhb derive-future-features \
-            --date-range "${INPUT_DATE_RANGE}" \
-            --trade-dates-file "${GITHUB_WORKSPACE}/my-stock-src/data/basic/trade_date.json" \
-            --summary-output "${RUNNER_TEMP}/lhb-derive-future-summary.json" \
-            --github-output "$GITHUB_OUTPUT"
-
-      - name: Report skip reason
-        if: steps.derive.outputs.should_run != 'true'
-        run: echo "${{ steps.derive.outputs.skip_reason }}"
-
-      - name: Sync gp-lhb-derived (publish target)
-        if: steps.derive.outputs.should_run == 'true'
-        run: python -m my_stock common sync-repo gp-lhb-derived
-
-      - name: Publish future to gp-lhb-derived
-        if: steps.derive.outputs.should_run == 'true'
-        run: |
-          python -m my_stock lhb publish-stock-daily \
-            --summary-path "${RUNNER_TEMP}/lhb-derive-future-summary.json" \
-            --target-repo gp-lhb-derived \
-            --repo-subdir future
-
-      - name: Upload summary
-        if: steps.derive.outputs.should_run == 'true'
-        uses: actions/upload-artifact@v4
-        with:
-          name: lhb-derive-future-summary
-          path: ${{ runner.temp }}/lhb-derive-future-summary.json
-          if-no-files-found: warn
-          retention-days: 7

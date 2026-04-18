@@ -145,23 +145,8 @@ jobs:
           python -m pip install --upgrade pip
           for i in 1 2 3; do python -m pip install ./my-stock-src && break || sleep 5; done
 
-      - name: Prepare stock_daily source
-        id: source
-        env:
-          CHUNK_START: ${{ matrix.start }}
-          CHUNK_END: ${{ matrix.end }}
-          EFFECTIVE_DATE_SOURCE: ${{ needs.prepare.outputs.effective_date_source }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          if [ "${EFFECTIVE_DATE_SOURCE}" = "action-private" ]; then
-            python -m my_stock lhb clone-action-private-stock-daily \
-              --output-dir "${RUNNER_TEMP}/ap-data"
-            echo "input_root=${RUNNER_TEMP}/ap-data/stock_daily" >> "$GITHUB_OUTPUT"
-          else
-            python -m my_stock common sync-repo gp-lhb
-            echo "input_root=${GP_RUNTIME_ROOT}/lhb/stock_daily" >> "$GITHUB_OUTPUT"
-          fi
+      - name: Sync gp-lhb data repo
+        run: python -m my_stock common sync-repo gp-lhb
 
       - name: Derive history features
         env:
@@ -173,7 +158,7 @@ jobs:
             --start "${CHUNK_START}" \
             --end "${CHUNK_END}" \
             --lookback-start "${LOOKBACK_START}" \
-            --input-root "${{ steps.source.outputs.input_root }}" \
+            --input-root "${GP_REPOS_ROOT}/gp-lhb/data/lhb/stock_daily" \
             --output-root "${RUNNER_TEMP}/lhb-l2h-output" \
             --summary-output "${RUNNER_TEMP}/lhb-l2h-summary.json"
 

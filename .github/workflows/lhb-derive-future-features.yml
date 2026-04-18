@@ -73,7 +73,7 @@ jobs:
       - name: Install project dependencies
         run: |
           python -m pip install --upgrade pip
-          for i in 1 2 3; do python -m pip install ./my-stock-src && break || sleep 5; done
+          for i in 1 2 3; do python -m pip install './my-stock-src[provider]' && break || sleep 5; done
 
       - name: Resolve effective inputs
         id: input
@@ -151,7 +151,7 @@ jobs:
       - name: Install project dependencies
         run: |
           python -m pip install --upgrade pip
-          for i in 1 2 3; do python -m pip install ./my-stock-src && break || sleep 5; done
+          for i in 1 2 3; do python -m pip install './my-stock-src[provider]' && break || sleep 5; done
 
       - name: Sync gp-lhb data repo
         run: python -m my_stock common sync-repo gp-lhb
@@ -257,7 +257,7 @@ jobs:
       - name: Install project dependencies
         run: |
           python -m pip install --upgrade pip
-          for i in 1 2 3; do python -m pip install ./my-stock-src && break || sleep 5; done
+          for i in 1 2 3; do python -m pip install './my-stock-src[provider]' && break || sleep 5; done
 
       - name: Download all date artifacts
         uses: actions/download-artifact@v4
@@ -314,7 +314,7 @@ jobs:
       - name: Install project dependencies
         run: |
           python -m pip install --upgrade pip
-          for i in 1 2 3; do python -m pip install ./my-stock-src && break || sleep 5; done
+          for i in 1 2 3; do python -m pip install './my-stock-src[provider]' && break || sleep 5; done
 
       - name: Dispatch next round
         run: |

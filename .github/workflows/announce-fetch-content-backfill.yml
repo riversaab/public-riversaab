@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       date_source:
-        description: "日期范围: YYYYMMDD~YYYYMMDD"
+        description: "日期范围 YYYYMMDD~YYYYMMDD 或 action-private"
         required: true
         type: string
       max_parallel:
@@ -78,10 +78,39 @@ jobs:
           for i in 1 2 3; do python -m pip install './my-stock-src[provider]' && break || sleep 5; done
 
       - name: Sync year raw repos for date range
+        env:
+          ACTION_DISPATCH_TOKEN_MAP: ${{ secrets.ACTION_DISPATCH_TOKEN_MAP }}
         run: |
-          python -m my_stock announce sync-year-repos \
-            --start "$(echo ${INPUT_DATE_SOURCE} | cut -d~ -f1 | sed 's/\(....\)\(..\)\(..\)/\1-\2-\3/')" \
-            --end "$(echo ${INPUT_DATE_SOURCE} | cut -d~ -f2 | sed 's/\(....\)\(..\)\(..\)/\1-\2-\3/')"
+          if [[ "${INPUT_DATE_SOURCE}" == "action-private" ]]; then
+            # Derive year range from action-private assigned dates
+            RANGE=$(python3 -c "
+          import json, os, subprocess, tempfile, pathlib
+          owner = os.environ.get('GITHUB_REPOSITORY_OWNER', '')
+          raw = os.environ.get('ACTION_DISPATCH_TOKEN_MAP', '')
+          token = ''
+          for line in raw.strip().splitlines():
+              e = json.loads(line.strip())
+              if e.get('owner') == owner:
+                  token = e['token']; break
+          if not token: exit(1)
+          d = pathlib.Path(tempfile.mkdtemp())
+          subprocess.run(['git','clone','--depth','1',
+              f'https://x-access-token:{token}@github.com/{owner}/action-private.git',
+              str(d/'ap')], check=True, capture_output=True)
+          p = d/'ap'/'data'/'job-matrix-announce-dates.json'
+          dates = json.loads(p.read_text()) if p.exists() else []
+          if dates:
+              mn, mx = min(dates), max(dates)
+              print(f'{mn[:4]}-{mn[4:6]}-{mn[6:8]}~{mx[:4]}-{mx[4:6]}-{mx[6:8]}')
+          else: print('2026-01-01~2026-12-31')
+          ")
+            START=$(echo "$RANGE" | cut -d~ -f1)
+            END=$(echo "$RANGE" | cut -d~ -f2)
+          else
+            START=$(echo ${INPUT_DATE_SOURCE} | cut -d~ -f1 | sed 's/\(....\)\(..\)\(..\)/\1-\2-\3/')
+            END=$(echo ${INPUT_DATE_SOURCE} | cut -d~ -f2 | sed 's/\(....\)\(..\)\(..\)/\1-\2-\3/')
+          fi
+          python -m my_stock announce sync-year-repos --start "$START" --end "$END"
 
       - name: Resolve effective inputs
         id: input
@@ -90,11 +119,12 @@ jobs:
 
       - name: Resolve backfill batches
         id: resolve
+        env:
+          ACTION_DISPATCH_TOKEN_MAP: ${{ secrets.ACTION_DISPATCH_TOKEN_MAP }}
         run: |
-          # candidates_dir is in the year repo under data/announce/candidates/
           python -m my_stock announce resolve-backfill-batches \
             --date-source "${INPUT_DATE_SOURCE}" \
-            --candidates-dir "${GP_REPOS_ROOT}/gp-announce-raw-$(echo ${INPUT_DATE_SOURCE} | cut -d~ -f1 | cut -c1-4)/data/announce/candidates" \
+            --repos-root "${GP_REPOS_ROOT}" \
             --batch-size 50 \
             --round-index "${INPUT_ROUND_INDEX}" \
             --github-output "$GITHUB_OUTPUT"

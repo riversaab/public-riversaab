@@ -244,7 +244,7 @@ jobs:
           for i in 1 2 3; do python -m pip install ./my-stock-src && break || sleep 5; done
 
       - name: Download all date artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v5
         with:
           pattern: lhb-l1-*
           path: ${{ runner.temp }}/lhb-artifacts

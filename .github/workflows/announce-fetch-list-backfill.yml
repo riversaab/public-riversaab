@@ -39,6 +39,7 @@ jobs:
       INPUT_ROUND_INDEX: ${{ github.event.inputs.round_index || '0' }}
       INPUT_MAX_PARALLEL: ${{ github.event.inputs.max_parallel || '1' }}
       MY_STOCK_PROJECT_ROOT: ${{ github.workspace }}/my-stock-src
+      ACTION_DISPATCH_TOKEN_MAP: ${{ secrets.ACTION_DISPATCH_TOKEN_MAP }}
     outputs:
       dates_matrix: ${{ steps.resolve.outputs.dates_matrix }}
       has_work: ${{ steps.resolve.outputs.has_work }}

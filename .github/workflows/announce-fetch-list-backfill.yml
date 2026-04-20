@@ -87,6 +87,7 @@ jobs:
             --date-source "${INPUT_DATE_SOURCE}" \
             --round-index "${INPUT_ROUND_INDEX}" \
             --max-parallel "${INPUT_MAX_PARALLEL}" \
+            --matrix-file "job-matrix-announce-dates.json" \
             --github-output "$GITHUB_OUTPUT"
 
   fetch-list-batch:

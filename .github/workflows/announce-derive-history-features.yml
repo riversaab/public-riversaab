@@ -95,6 +95,7 @@ jobs:
             --round-index "${INPUT_ROUND_INDEX}" \
             --max-parallel "${INPUT_MAX_PARALLEL}" \
             --trade-dates-file "${GITHUB_WORKSPACE}/my-stock-src/data/basic/trade_date.json" \
+            --matrix-file "job-matrix-announce-dates.json" \
             --github-output "$GITHUB_OUTPUT"
 
   derive-batch:

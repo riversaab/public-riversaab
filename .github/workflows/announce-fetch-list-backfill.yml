@@ -108,7 +108,7 @@ jobs:
       CODE_GITHUB_PAT: ${{ secrets.HIYISHUI_PAT }}
       MY_STOCK_PROJECT_ROOT: ${{ github.workspace }}/my-stock-src
       INPUT_HIGH_ONLY: ${{ github.event.inputs.high_only || 'false' }}
-      INPUT_BATCH_SIZE: ${{ github.event.inputs.batch_size || '1000' }}
+      INPUT_BATCH_SIZE: ${{ github.event.inputs.batch_size || '50' }}
     steps:
       - name: Check out workflow replica repo
         uses: actions/checkout@v4
@@ -304,6 +304,9 @@ jobs:
           for i in 1 2 3; do python -m pip install './my-stock-src[provider]' && break || sleep 5; done
 
       - name: Dispatch next round
+        env:
+          EXTRA_HIGH_ONLY: ${{ github.event.inputs.high_only || 'false' }}
+          EXTRA_BATCH_SIZE: ${{ github.event.inputs.batch_size || '50' }}
         run: |
           python -m my_stock announce trigger-next-round \
             --date-source "${{ github.event.inputs.date_source }}" \
@@ -311,4 +314,4 @@ jobs:
             --current-round "${{ needs.prepare.outputs.current_round }}" \
             --total-rounds "${{ needs.prepare.outputs.total_rounds }}" \
             --workflow-file "announce-fetch-list-backfill.yml" \
-            --extra-inputs '{"high_only":"${{ github.event.inputs.high_only || '\''false'\'' }}","batch_size":"${{ github.event.inputs.batch_size || '\''1000'\'' }}"}'
+            --extra-inputs "{\"high_only\":\"${EXTRA_HIGH_ONLY}\",\"batch_size\":\"${EXTRA_BATCH_SIZE}\"}"

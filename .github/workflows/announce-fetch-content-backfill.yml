@@ -3,8 +3,8 @@ name: 公告正文回填 (L0-content)
 on:
   workflow_dispatch:
     inputs:
-      year:
-        description: "目标年份 (如 2019)，用于定位年仓中的 content_batches"
+      date_source:
+        description: "日期范围: YYYYMMDD~YYYYMMDD"
         required: true
         type: string
       max_parallel:
@@ -13,7 +13,7 @@ on:
         default: "20"
         type: string
       round_index:
-        description: "当前轮次索引（0-based）"
+        description: "当前轮次索引（0-based），每轮处理一个日期"
         required: false
         default: "0"
         type: string
@@ -23,16 +23,16 @@ permissions:
   actions: write
 
 concurrency:
-  group: announce-fetch-content-backfill-${{ github.repository }}-${{ github.event.inputs.year }}
+  group: announce-fetch-content-backfill-${{ github.repository }}
   cancel-in-progress: false
 
 jobs:
   prepare:
     runs-on: ubuntu-latest
     env:
-      INPUT_YEAR: ${{ github.event.inputs.year }}
+      INPUT_DATE_SOURCE: ${{ github.event.inputs.date_source }}
       INPUT_ROUND_INDEX: ${{ github.event.inputs.round_index || '0' }}
-      INPUT_MAX_PARALLEL: ${{ github.event.inputs.max_parallel || '5' }}
+      INPUT_MAX_PARALLEL: ${{ github.event.inputs.max_parallel || '20' }}
       GP_CODE_GITHUB_OWNER: hiyishui
       GP_DATA_GITHUB_OWNER: larkself
       DATA_GITHUB_PAT: ${{ secrets.LARKSELF_PAT }}
@@ -44,9 +44,10 @@ jobs:
       has_next_round: ${{ steps.resolve.outputs.has_next_round }}
       total_rounds: ${{ steps.resolve.outputs.total_rounds }}
       current_round: ${{ steps.resolve.outputs.current_round }}
+      current_date: ${{ steps.resolve.outputs.current_date }}
+      batch_count: ${{ steps.resolve.outputs.batch_count }}
+      batch_tmp_dir: ${{ steps.resolve.outputs.batch_tmp_dir }}
       max_parallel: ${{ steps.input.outputs.max_parallel }}
-      batch_dir: ${{ steps.paths.outputs.batch_dir }}
-      content_dir: ${{ steps.paths.outputs.content_dir }}
     steps:
       - name: Check out workflow replica repo
         uses: actions/checkout@v4
@@ -76,18 +77,11 @@ jobs:
           python -m pip install --upgrade pip
           for i in 1 2 3; do python -m pip install './my-stock-src[provider]' && break || sleep 5; done
 
-      - name: Sync year raw repo
+      - name: Sync year raw repos for date range
         run: |
           python -m my_stock announce sync-year-repos \
-            --start "${INPUT_YEAR}-01-01" \
-            --end "${INPUT_YEAR}-12-31"
-
-      - name: Resolve paths
-        id: paths
-        run: |
-          REPO_DIR="${GP_REPOS_ROOT}/gp-announce-raw-${INPUT_YEAR}"
-          echo "batch_dir=${REPO_DIR}/data/announce/content_batches" >> "$GITHUB_OUTPUT"
-          echo "content_dir=${REPO_DIR}/raw/content" >> "$GITHUB_OUTPUT"
+            --start "$(echo ${INPUT_DATE_SOURCE} | cut -d~ -f1 | sed 's/\(....\)\(..\)\(..\)/\1-\2-\3/')" \
+            --end "$(echo ${INPUT_DATE_SOURCE} | cut -d~ -f2 | sed 's/\(....\)\(..\)\(..\)/\1-\2-\3/')"
 
       - name: Resolve effective inputs
         id: input
@@ -97,12 +91,21 @@ jobs:
       - name: Resolve backfill batches
         id: resolve
         run: |
+          # candidates_dir is in the year repo under data/announce/candidates/
           python -m my_stock announce resolve-backfill-batches \
-            --batch-dir "${{ steps.paths.outputs.batch_dir }}" \
-            --content-dir "${{ steps.paths.outputs.content_dir }}" \
+            --date-source "${INPUT_DATE_SOURCE}" \
+            --candidates-dir "${GP_REPOS_ROOT}/gp-announce-raw-$(echo ${INPUT_DATE_SOURCE} | cut -d~ -f1 | cut -c1-4)/data/announce/candidates" \
+            --batch-size 50 \
             --round-index "${INPUT_ROUND_INDEX}" \
-            --max-parallel "${INPUT_MAX_PARALLEL}" \
             --github-output "$GITHUB_OUTPUT"
+
+      - name: Upload batch splits
+        if: steps.resolve.outputs.has_work == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: batch-splits
+          path: ${{ steps.resolve.outputs.batch_tmp_dir }}
+          retention-days: 1
 
   fetch-content-batch:
     runs-on: ubuntu-latest
@@ -111,6 +114,7 @@ jobs:
     timeout-minutes: 60
     strategy:
       matrix: ${{ fromJson(needs.prepare.outputs.batches_matrix) }}
+      max-parallel: 20
       fail-fast: false
     env:
       GP_CODE_GITHUB_OWNER: hiyishui
@@ -118,7 +122,7 @@ jobs:
       DATA_GITHUB_PAT: ${{ secrets.LARKSELF_PAT }}
       CODE_GITHUB_PAT: ${{ secrets.HIYISHUI_PAT }}
       MY_STOCK_PROJECT_ROOT: ${{ github.workspace }}/my-stock-src
-      INPUT_YEAR: ${{ github.event.inputs.year }}
+      CURRENT_DATE: ${{ needs.prepare.outputs.current_date }}
     steps:
       - name: Check out workflow replica repo
         uses: actions/checkout@v4
@@ -148,29 +152,29 @@ jobs:
           python -m pip install --upgrade pip
           for i in 1 2 3; do python -m pip install './my-stock-src[provider]' && break || sleep 5; done
 
-      - name: Sync year raw repo
-        run: |
-          python -m my_stock announce sync-year-repos \
-            --start "${INPUT_YEAR}-01-01" \
-            --end "${INPUT_YEAR}-12-31"
+      - name: Download batch splits
+        uses: actions/download-artifact@v4
+        with:
+          name: batch-splits
+          path: ${{ runner.temp }}/batch-splits
 
       - name: Fetch content for batch
         env:
-          BATCH_NAME: ${{ matrix.batch }}
-          BATCH_DIR: ${{ needs.prepare.outputs.batch_dir }}
+          BATCH_IDX: ${{ matrix.batch_idx }}
         run: |
+          BATCH_FILE=$(printf "${RUNNER_TEMP}/batch-splits/batch_%04d.json" "${BATCH_IDX}")
           ARTIFACT_ROOT="${RUNNER_TEMP}/announce-content-artifact"
           mkdir -p "${ARTIFACT_ROOT}"
           python -m my_stock announce fetch-content-worker \
-            --codes-file "${BATCH_DIR}/${BATCH_NAME}" \
-            --runner-idx 0 \
+            --codes-file "${BATCH_FILE}" \
+            --runner-idx "${BATCH_IDX}" \
             --output-dir "${ARTIFACT_ROOT}" \
             --summary-output "${RUNNER_TEMP}/content-summary.json"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: announce-l0-content-${{ matrix.batch }}
+          name: announce-l0-content-${{ needs.prepare.outputs.current_date }}-${{ matrix.batch_idx }}
           path: ${{ runner.temp }}/announce-content-artifact
           if-no-files-found: warn
           retention-days: 7
@@ -269,9 +273,9 @@ jobs:
       - name: Dispatch next round
         run: |
           python -m my_stock announce trigger-next-round \
-            --date-source "${{ github.event.inputs.year }}" \
+            --date-source "${{ github.event.inputs.date_source }}" \
             --max-parallel "${{ needs.prepare.outputs.max_parallel }}" \
             --current-round "${{ needs.prepare.outputs.current_round }}" \
             --total-rounds "${{ needs.prepare.outputs.total_rounds }}" \
             --workflow-file "announce-fetch-content-backfill.yml" \
-            --extra-inputs '{"year":"${{ github.event.inputs.year }}"}'
+            --extra-inputs '{"date_source":"${{ github.event.inputs.date_source }}"}'

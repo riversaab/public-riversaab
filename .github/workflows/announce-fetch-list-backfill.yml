@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       date_source:
-        description: "月份范围: YYYYMM~YYYYMM 或 YYYYMMDD~YYYYMMDD"
+        description: "日期范围: YYYYMMDD~YYYYMMDD"
         required: true
         type: string
       max_parallel:
@@ -45,7 +45,7 @@ jobs:
       INPUT_MAX_PARALLEL: ${{ github.event.inputs.max_parallel || '1' }}
       MY_STOCK_PROJECT_ROOT: ${{ github.workspace }}/my-stock-src
     outputs:
-      months_matrix: ${{ steps.resolve.outputs.months_matrix }}
+      dates_matrix: ${{ steps.resolve.outputs.dates_matrix }}
       has_work: ${{ steps.resolve.outputs.has_work }}
       has_next_round: ${{ steps.resolve.outputs.has_next_round }}
       total_rounds: ${{ steps.resolve.outputs.total_rounds }}
@@ -85,10 +85,10 @@ jobs:
         run: |
           echo "max_parallel=${INPUT_MAX_PARALLEL}" >> "$GITHUB_OUTPUT"
 
-      - name: Resolve backfill months
+      - name: Resolve backfill dates
         id: resolve
         run: |
-          python -m my_stock announce resolve-backfill-months \
+          python -m my_stock announce resolve-backfill-dates \
             --date-source "${INPUT_DATE_SOURCE}" \
             --round-index "${INPUT_ROUND_INDEX}" \
             --max-parallel "${INPUT_MAX_PARALLEL}" \
@@ -99,7 +99,7 @@ jobs:
     needs: prepare
     if: needs.prepare.outputs.has_work == 'true'
     strategy:
-      matrix: ${{ fromJson(needs.prepare.outputs.months_matrix) }}
+      matrix: ${{ fromJson(needs.prepare.outputs.dates_matrix) }}
       fail-fast: false
     env:
       GP_CODE_GITHUB_OWNER: hiyishui
@@ -138,29 +138,26 @@ jobs:
           python -m pip install --upgrade pip
           for i in 1 2 3; do python -m pip install './my-stock-src[provider]' && break || sleep 5; done
 
-      - name: Compute month date range
+      - name: Compute date range
         id: dates
         env:
-          MONTH: ${{ matrix.month }}
+          DATE_STR: ${{ matrix.date }}
         shell: bash
         run: |
           set -euo pipefail
-          year=${MONTH:0:4}
-          mon=${MONTH:4:2}
-          start="${year}-${mon}-01"
-          # Last day of month
-          end=$(date -d "${year}-${mon}-01 + 1 month - 1 day" +%Y-%m-%d 2>/dev/null \
-                || python3 -c "import calendar; y,m=int('${year}'),int('${mon}'); print(f'${year}-${mon}-{calendar.monthrange(y,m)[1]:02d}')")
+          # DATE_STR is YYYYMMDD — convert to YYYY-MM-DD
+          start="${DATE_STR:0:4}-${DATE_STR:4:2}-${DATE_STR:6:2}"
+          end="${start}"
           echo "start=${start}" >> "$GITHUB_OUTPUT"
           echo "end=${end}" >> "$GITHUB_OUTPUT"
 
-      - name: Sync year repos for this month
+      - name: Sync year repos for this date
         run: |
           python -m my_stock announce sync-year-repos \
             --start "${{ steps.dates.outputs.start }}" \
             --end "${{ steps.dates.outputs.end }}"
 
-      - name: Fetch list (monthly parquet)
+      - name: Fetch list (daily)
         run: |
           ARTIFACT_ROOT="${RUNNER_TEMP}/announce-artifact/list"
           mkdir -p "${ARTIFACT_ROOT}"
@@ -207,7 +204,7 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: announce-l0-list-${{ matrix.month }}
+          name: announce-l0-list-${{ matrix.date }}
           path: ${{ runner.temp }}/announce-artifact
           if-no-files-found: warn
           retention-days: 7
@@ -249,7 +246,7 @@ jobs:
           python -m pip install --upgrade pip
           for i in 1 2 3; do python -m pip install './my-stock-src[provider]' && break || sleep 5; done
 
-      - name: Download all month artifacts
+      - name: Download all date artifacts
         uses: actions/download-artifact@v4
         with:
           pattern: announce-l0-list-*

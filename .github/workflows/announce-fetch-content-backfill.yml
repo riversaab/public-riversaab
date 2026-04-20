@@ -125,6 +125,7 @@ jobs:
           python -m my_stock announce resolve-backfill-batches \
             --date-source "${INPUT_DATE_SOURCE}" \
             --repos-root "${GP_REPOS_ROOT}" \
+            --matrix-file "job-matrix-announce-dates.json" \
             --batch-size 50 \
             --round-index "${INPUT_ROUND_INDEX}" \
             --github-output "$GITHUB_OUTPUT"

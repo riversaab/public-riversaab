@@ -154,6 +154,7 @@ jobs:
           TARGET_DATE: ${{ matrix.date }}
         run: |
           python -m my_stock announce derive-history-features \
+            --input-root "${GP_REPOS_ROOT}/gp-announce-features/data/stock_event_daily_features" \
             --start "${TARGET_DATE}" \
             --end "${TARGET_DATE}" \
             --summary-output "${RUNNER_TEMP}/announce-derive-history-${TARGET_DATE}.json"

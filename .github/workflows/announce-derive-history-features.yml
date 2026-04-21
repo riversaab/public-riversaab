@@ -155,6 +155,7 @@ jobs:
         run: |
           python -m my_stock announce derive-history-features \
             --input-root "${GP_REPOS_ROOT}/gp-announce-features/data/announce/features" \
+            --trade-dates-file "${GITHUB_WORKSPACE}/my-stock-src/data/basic/trade_date.json" \
             --start "${TARGET_DATE}" \
             --end "${TARGET_DATE}" \
             --summary-output "${RUNNER_TEMP}/announce-derive-history-${TARGET_DATE}.json"

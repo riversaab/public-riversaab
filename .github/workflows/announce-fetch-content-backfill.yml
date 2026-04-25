@@ -193,6 +193,12 @@ jobs:
         env:
           BATCH_IDX: ${{ matrix.batch_idx }}
         run: |
+          # 错峰启动：按 batch_idx 阶梯延迟（每个 idx 多等 3s），避免 22 个 runner 同时打 API 触发限流
+          STAGGER=$(( BATCH_IDX * 3 ))
+          if [ "$STAGGER" -gt 0 ]; then
+            echo "[stagger] sleeping ${STAGGER}s before fetch (batch_idx=${BATCH_IDX})"
+            sleep "$STAGGER"
+          fi
           BATCH_FILE=$(printf "${RUNNER_TEMP}/batch-splits/batch_%04d.json" "${BATCH_IDX}")
           ARTIFACT_ROOT="${RUNNER_TEMP}/announce-content-artifact"
           mkdir -p "${ARTIFACT_ROOT}"

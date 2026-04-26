@@ -142,7 +142,9 @@ jobs:
     runs-on: ubuntu-latest
     needs: prepare
     if: needs.prepare.outputs.has_work == 'true'
-    timeout-minutes: 60
+    # 单个 batch 硬上限 10 分钟。超时后该 runner 被取消、artifact 不会上传，
+    # 但其它 batch 不受影响；缺漏的 art_code 由 announce-fetch-content-miss-backfill 兜底回收。
+    timeout-minutes: 10
     strategy:
       matrix: ${{ fromJson(needs.prepare.outputs.batches_matrix) }}
       max-parallel: 20
@@ -219,7 +221,12 @@ jobs:
   collect-round:
     runs-on: ubuntu-latest
     needs: [prepare, fetch-content-batch]
-    if: needs.prepare.outputs.has_work == 'true'
+    # 即使个别 batch 因 timeout-minutes 触发被取消（result=cancelled/failure），
+    # 也要把已成功的 artifact 收集并 push 到 action-private；剩余 art_code 由 miss-backfill 补齐。
+    if: |
+      always() &&
+      needs.prepare.outputs.has_work == 'true' &&
+      needs.prepare.result == 'success'
     env:
       DATA_GITHUB_PAT: ${{ secrets.LARKSELF_PAT }}
       MY_STOCK_PROJECT_ROOT: ${{ github.workspace }}/my-stock-src

@@ -254,6 +254,34 @@ jobs:
           for i in 1 2 3; do python -m pip install './my-stock-src[provider]' && break || sleep 5; done
 
       - name: Download all batch artifacts
+        id: dl1
+        continue-on-error: true
+        uses: actions/download-artifact@v5
+        with:
+          pattern: announce-l0-content-*
+          path: ${{ runner.temp }}/announce-artifacts
+          merge-multiple: true
+
+      - name: Wait before retry 1
+        if: steps.dl1.outcome == 'failure'
+        run: sleep 30
+
+      - name: Download all batch artifacts (retry 1)
+        if: steps.dl1.outcome == 'failure'
+        id: dl2
+        continue-on-error: true
+        uses: actions/download-artifact@v5
+        with:
+          pattern: announce-l0-content-*
+          path: ${{ runner.temp }}/announce-artifacts
+          merge-multiple: true
+
+      - name: Wait before retry 2
+        if: steps.dl1.outcome == 'failure' && steps.dl2.outcome == 'failure'
+        run: sleep 60
+
+      - name: Download all batch artifacts (retry 2)
+        if: steps.dl1.outcome == 'failure' && steps.dl2.outcome == 'failure'
         uses: actions/download-artifact@v5
         with:
           pattern: announce-l0-content-*
